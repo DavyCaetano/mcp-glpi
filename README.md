@@ -33,13 +33,13 @@ A Model Context Protocol (MCP) server that provides integration with GLPI (Gesti
 ## Installation
 
 ```bash
-npm install -g mcp-server-glpi
+npm install -g mcp-glpi
 ```
 
 Or use directly with npx:
 
 ```bash
-npx mcp-server-glpi
+npx mcp-glpi
 ```
 
 ## Configuration
@@ -77,7 +77,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "glpi": {
       "command": "npx",
-      "args": ["mcp-server-glpi"],
+      "args": ["mcp-glpi"],
       "env": {
         "GLPI_URL": "https://your-glpi-instance.com",
         "GLPI_APP_TOKEN": "your-app-token",
@@ -104,8 +104,8 @@ Once configured, you can ask Claude to:
 ### Building from source
 
 ```bash
-git clone https://github.com/GMS64260/mcp-server-glpi.git
-cd mcp-server-glpi
+git clone https://github.com/GMS64260/mcp-glpi.git
+cd mcp-glpi
 npm install
 npm run build
 ```

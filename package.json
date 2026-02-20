@@ -1,11 +1,11 @@
 {
-  "name": "mcp-server-glpi",
+  "name": "mcp-glpi",
   "version": "1.0.0",
   "description": "MCP Server for GLPI - IT Service Management integration with Claude",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "mcp-server-glpi": "dist/index.js"
+    "mcp-glpi": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -31,12 +31,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GMS64260/mcp-server-glpi.git"
+    "url": "https://github.com/GMS64260/mcp-glpi.git"
   },
   "bugs": {
-    "url": "https://github.com/GMS64260/mcp-server-glpi/issues"
+    "url": "https://github.com/GMS64260/mcp-glpi/issues"
   },
-  "homepage": "https://github.com/GMS64260/mcp-server-glpi#readme",
+  "homepage": "https://github.com/GMS64260/mcp-glpi#readme",
   "engines": {
     "node": ">=18.0.0"
   },
