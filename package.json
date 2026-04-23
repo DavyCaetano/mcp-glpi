@@ -1,6 +1,6 @@
 {
-  "name": "mcp-glpi",
-  "version": "2.0.0",
+  "name": "@davyc/mcp-glpi",
+  "version": "2.1.0",
   "description": "Full-featured MCP Server for GLPI - Complete IT Service Management integration with Claude (Tickets, Problems, Changes, Assets, Knowledge Base, Contracts, Projects)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -44,12 +44,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GMS64260/mcp-glpi.git"
+    "url": "https://github.com/DavyCaetano/mcp-glpi"
   },
   "bugs": {
-    "url": "https://github.com/GMS64260/mcp-glpi/issues"
+    "url": "https://github.com/DavyCaetano/mcp-glpi/issues"
   },
-  "homepage": "https://github.com/GMS64260/mcp-glpi#readme",
+  "homepage": "https://github.com/DavyCaetano/mcp-glpi#readme",
   "engines": {
     "node": ">=18.0.0"
   },
