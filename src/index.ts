@@ -148,6 +148,23 @@ function getInteractionIds(args: any, itemLabel: string): number[] {
   return uniqueIds;
 }
 
+type InteractionFetchResult = {
+  items: any[];
+  error: string | null;
+};
+
+async function safeGetInteractions(fetcher: () => Promise<any[]>): Promise<InteractionFetchResult> {
+  try {
+    const items = await fetcher();
+    return { items, error: null };
+  } catch (error) {
+    return {
+      items: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function validateTagsPluginName(pluginName: string): void {
   const normalized = pluginName.trim().toLowerCase();
   const supported = ['tag', 'tags', 'plugin_tag', 'plugintag'];
@@ -1467,12 +1484,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const pagination = getPagination(args);
 
         const items = await Promise.all(ids.map(async (ticketId) => {
-          const [followups, tasks, solutions, approvals] = await Promise.all([
-            glpiClient.getTicketFollowups(ticketId, pagination),
-            glpiClient.getTicketTasks(ticketId, pagination),
-            glpiClient.getTicketSolutions(ticketId, pagination),
-            glpiClient.getTicketApprovals(ticketId, pagination),
+          const [followupsResult, tasksResult, solutionsResult, approvalsResult] = await Promise.all([
+            safeGetInteractions(() => glpiClient.getTicketFollowups(ticketId, pagination)),
+            safeGetInteractions(() => glpiClient.getTicketTasks(ticketId, pagination)),
+            safeGetInteractions(() => glpiClient.getTicketSolutions(ticketId, pagination)),
+            safeGetInteractions(() => glpiClient.getTicketApprovals(ticketId, pagination)),
           ]);
+
+          const followups = followupsResult.items;
+          const tasks = tasksResult.items;
+          const solutions = solutionsResult.items;
+          const approvals = approvalsResult.items;
 
           return {
             ticket_id: ticketId,
@@ -1487,6 +1509,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               tasks: tasks.length === pagination.limit,
               solutions: solutions.length === pagination.limit,
               approvals: approvals.length === pagination.limit,
+            },
+            errors: {
+              followups: followupsResult.error,
+              tasks: tasksResult.error,
+              solutions: solutionsResult.error,
+              approvals: approvalsResult.error,
             },
             followups,
             tasks,
@@ -1669,12 +1697,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const pagination = getPagination(args);
 
         const items = await Promise.all(ids.map(async (problemId) => {
-          const [followups, tasks, solutions, approvals] = await Promise.all([
-            glpiClient.getProblemFollowups(problemId, pagination),
-            glpiClient.getProblemTasks(problemId, pagination),
-            glpiClient.getProblemSolutions(problemId, pagination),
-            glpiClient.getProblemApprovals(problemId, pagination),
+          const [followupsResult, tasksResult, solutionsResult, approvalsResult] = await Promise.all([
+            safeGetInteractions(() => glpiClient.getProblemFollowups(problemId, pagination)),
+            safeGetInteractions(() => glpiClient.getProblemTasks(problemId, pagination)),
+            safeGetInteractions(() => glpiClient.getProblemSolutions(problemId, pagination)),
+            safeGetInteractions(() => glpiClient.getProblemApprovals(problemId, pagination)),
           ]);
+
+          const followups = followupsResult.items;
+          const tasks = tasksResult.items;
+          const solutions = solutionsResult.items;
+          const approvals = approvalsResult.items;
 
           return {
             problem_id: problemId,
@@ -1689,6 +1722,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               tasks: tasks.length === pagination.limit,
               solutions: solutions.length === pagination.limit,
               approvals: approvals.length === pagination.limit,
+            },
+            errors: {
+              followups: followupsResult.error,
+              tasks: tasksResult.error,
+              solutions: solutionsResult.error,
+              approvals: approvalsResult.error,
             },
             followups,
             tasks,
@@ -1870,12 +1909,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const pagination = getPagination(args);
 
         const items = await Promise.all(ids.map(async (changeId) => {
-          const [followups, tasks, solutions, approvals] = await Promise.all([
-            glpiClient.getChangeFollowups(changeId, pagination),
-            glpiClient.getChangeTasks(changeId, pagination),
-            glpiClient.getChangeSolutions(changeId, pagination),
-            glpiClient.getChangeApprovals(changeId, pagination),
+          const [followupsResult, tasksResult, solutionsResult, approvalsResult] = await Promise.all([
+            safeGetInteractions(() => glpiClient.getChangeFollowups(changeId, pagination)),
+            safeGetInteractions(() => glpiClient.getChangeTasks(changeId, pagination)),
+            safeGetInteractions(() => glpiClient.getChangeSolutions(changeId, pagination)),
+            safeGetInteractions(() => glpiClient.getChangeApprovals(changeId, pagination)),
           ]);
+
+          const followups = followupsResult.items;
+          const tasks = tasksResult.items;
+          const solutions = solutionsResult.items;
+          const approvals = approvalsResult.items;
 
           return {
             change_id: changeId,
@@ -1890,6 +1934,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               tasks: tasks.length === pagination.limit,
               solutions: solutions.length === pagination.limit,
               approvals: approvals.length === pagination.limit,
+            },
+            errors: {
+              followups: followupsResult.error,
+              tasks: tasksResult.error,
+              solutions: solutionsResult.error,
+              approvals: approvalsResult.error,
             },
             followups,
             tasks,
