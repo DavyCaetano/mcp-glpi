@@ -26,8 +26,9 @@ A comprehensive Model Context Protocol (MCP) server providing full integration w
 | `glpi_add_task` | Add a task with time tracking |
 | `glpi_add_solution` | Add solution to close ticket |
 | `glpi_assign_ticket` | Assign ticket to user/group |
-| `glpi_get_ticket_tasks` | Get all tasks |
-| `glpi_get_ticket_followups` | Get all followups |
+| `glpi_get_ticket_tasks` | Get ticket tasks (paginated) |
+| `glpi_get_ticket_followups` | Get ticket followups (paginated) |
+| `glpi_get_ticket_interactions` | Get followups/tasks/solutions/approvals (single or batch) |
 
 ### Problem Management (ITIL)
 | Tool | Description |
@@ -36,6 +37,11 @@ A comprehensive Model Context Protocol (MCP) server providing full integration w
 | `glpi_get_problem` | Get problem details |
 | `glpi_create_problem` | Create a new problem |
 | `glpi_update_problem` | Update a problem |
+| `glpi_add_problem_followup` | Add followup to a problem |
+| `glpi_get_problem_followups` | Get problem followups (paginated) |
+| `glpi_add_problem_task` | Add task to a problem |
+| `glpi_get_problem_tasks` | Get problem tasks (paginated) |
+| `glpi_get_problem_interactions` | Get followups/tasks/solutions/approvals (single or batch) |
 
 ### Change Management (ITIL)
 | Tool | Description |
@@ -44,6 +50,17 @@ A comprehensive Model Context Protocol (MCP) server providing full integration w
 | `glpi_get_change` | Get change details |
 | `glpi_create_change` | Create a new change |
 | `glpi_update_change` | Update a change |
+| `glpi_add_change_followup` | Add followup to a change |
+| `glpi_get_change_followups` | Get change followups (paginated) |
+| `glpi_add_change_task` | Add task to a change |
+| `glpi_get_change_tasks` | Get change tasks (paginated) |
+| `glpi_get_change_interactions` | Get followups/tasks/solutions/approvals (single or batch) |
+
+### Plugin Tags
+| Tool | Description |
+|------|-------------|
+| `glpi_list_plugin_tags` | List tags registered in plugin Tags |
+| `glpi_search_plugin_tag_items` | Search items linked to a tag (by `tag_id` or `tag_name`) |
 
 ### Asset Management
 | Tool | Description |
@@ -118,6 +135,11 @@ A comprehensive Model Context Protocol (MCP) server providing full integration w
 | `glpi_get_asset_stats` | Asset inventory stats |
 | `glpi_get_session_info` | Current session info |
 | `glpi_search` | Advanced multi-criteria search |
+
+### Pagination
+- Tools with `limit`/`offset` support enforce `limit` between `1` and `100`.
+- Default pagination is `limit=50` and `offset=0`.
+- Batch interaction tools accept `id` or `ids` (up to 100 IDs per request).
 
 ### Resources (Quick Access)
 | Resource URI | Description |
@@ -205,6 +227,14 @@ Once configured, you can ask Claude to:
 - "List all open problems"
 - "Create a change request for the server upgrade"
 - "Show me pending changes for approval"
+- "Add a followup to problem #123"
+- "List tasks from change #456 with limit 100 and offset 0"
+- "Get all interactions for tickets 10, 20 and 30"
+
+### Plugin Tags
+- "List all registered tags from plugin tags"
+- "Find items linked to tag 'VPN' in plugin tags"
+- "Search only Ticket links for tag #12 in plugin tags"
 
 ### Asset Management
 - "List all computers in the inventory"

@@ -91,6 +91,72 @@ const server = new Server(
 
 let glpiClient: GlpiClient;
 
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 100;
+const MAX_BATCH_IDS = 100;
+
+function getPagination(args: any): { limit: number; offset: number } {
+  const rawLimit = args?.limit;
+  const rawOffset = args?.offset;
+
+  const limit = rawLimit === undefined ? DEFAULT_PAGE_LIMIT : Number(rawLimit);
+  const offset = rawOffset === undefined ? 0 : Number(rawOffset);
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
+    throw new McpError(ErrorCode.InvalidParams, `limit must be an integer between 1 and ${MAX_PAGE_LIMIT}`);
+  }
+
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new McpError(ErrorCode.InvalidParams, 'offset must be an integer greater than or equal to 0');
+  }
+
+  return { limit, offset };
+}
+
+function getInteractionIds(args: any, itemLabel: string): number[] {
+  const singleId = args?.id;
+  const multipleIds = args?.ids;
+
+  if (singleId === undefined && !Array.isArray(multipleIds)) {
+    throw new McpError(ErrorCode.InvalidParams, 'id or ids is required');
+  }
+
+  const ids: number[] = [];
+
+  if (singleId !== undefined) {
+    ids.push(Number(singleId));
+  }
+
+  if (Array.isArray(multipleIds)) {
+    ids.push(...multipleIds.map((value: unknown) => Number(value)));
+  }
+
+  const uniqueIds = [...new Set(ids)];
+
+  if (uniqueIds.length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, 'At least one valid id is required');
+  }
+
+  if (uniqueIds.length > MAX_BATCH_IDS) {
+    throw new McpError(ErrorCode.InvalidParams, `Maximum of ${MAX_BATCH_IDS} ${itemLabel} IDs per request`);
+  }
+
+  if (uniqueIds.some((id) => !Number.isInteger(id) || id < 1)) {
+    throw new McpError(ErrorCode.InvalidParams, 'All ids must be positive integers');
+  }
+
+  return uniqueIds;
+}
+
+function validateTagsPluginName(pluginName: string): void {
+  const normalized = pluginName.trim().toLowerCase();
+  const supported = ['tag', 'tags', 'plugin_tag', 'plugintag'];
+
+  if (!supported.includes(normalized)) {
+    throw new McpError(ErrorCode.InvalidParams, `Unsupported plugin_name '${pluginName}'. Currently only 'tags' is supported.`);
+  }
+}
+
 // Define available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -225,6 +291,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             ticket_id: { type: 'number', description: 'The ticket ID' },
+            limit: { type: 'number', description: 'Maximum number of tasks to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
           },
           required: ['ticket_id'],
         },
@@ -236,8 +304,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             ticket_id: { type: 'number', description: 'The ticket ID' },
+            limit: { type: 'number', description: 'Maximum number of followups to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
           },
           required: ['ticket_id'],
+        },
+      },
+      {
+        name: 'glpi_get_ticket_interactions',
+        description: 'Get all ticket interactions (followups, tasks, solutions, approvals) for one or multiple tickets',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'number', description: 'Single ticket ID' },
+            ids: {
+              type: 'array',
+              items: { type: 'number' },
+              description: 'List of ticket IDs (max: 100)',
+            },
+            limit: { type: 'number', description: 'Maximum number of interactions per category (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
         },
       },
 
@@ -295,6 +382,81 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['id'],
         },
       },
+      {
+        name: 'glpi_add_problem_followup',
+        description: 'Add a followup/comment to a problem',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            problem_id: { type: 'number', description: 'The problem ID' },
+            content: { type: 'string', description: 'Followup content' },
+            is_private: { type: 'boolean', description: 'Whether the followup is private (default: false)' },
+          },
+          required: ['problem_id', 'content'],
+        },
+      },
+      {
+        name: 'glpi_get_problem_followups',
+        description: 'Get all followups/comments for a problem',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            problem_id: { type: 'number', description: 'The problem ID' },
+            limit: { type: 'number', description: 'Maximum number of followups to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+          required: ['problem_id'],
+        },
+      },
+      {
+        name: 'glpi_add_problem_task',
+        description: 'Add a task to a problem',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            problem_id: { type: 'number', description: 'The problem ID' },
+            content: { type: 'string', description: 'Task description' },
+            actiontime: { type: 'number', description: 'Time spent in seconds' },
+            is_private: { type: 'boolean', description: 'Whether the task is private' },
+            state: { type: 'number', description: 'Task state (0=Information, 1=To do, 2=Done)' },
+            users_id_tech: { type: 'number', description: 'Technician user ID' },
+            groups_id_tech: { type: 'number', description: 'Technician group ID' },
+            begin: { type: 'string', description: 'Task begin datetime' },
+            end: { type: 'string', description: 'Task end datetime' },
+          },
+          required: ['problem_id', 'content'],
+        },
+      },
+      {
+        name: 'glpi_get_problem_tasks',
+        description: 'Get all tasks for a problem',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            problem_id: { type: 'number', description: 'The problem ID' },
+            limit: { type: 'number', description: 'Maximum number of tasks to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+          required: ['problem_id'],
+        },
+      },
+      {
+        name: 'glpi_get_problem_interactions',
+        description: 'Get all problem interactions (followups, tasks, solutions, approvals) for one or multiple problems',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'number', description: 'Single problem ID' },
+            ids: {
+              type: 'array',
+              items: { type: 'number' },
+              description: 'List of problem IDs (max: 100)',
+            },
+            limit: { type: 'number', description: 'Maximum number of interactions per category (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+        },
+      },
 
       // ==================== CHANGE TOOLS ====================
       {
@@ -347,6 +509,81 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             status: { type: 'number', description: 'New status' },
           },
           required: ['id'],
+        },
+      },
+      {
+        name: 'glpi_add_change_followup',
+        description: 'Add a followup/comment to a change',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            change_id: { type: 'number', description: 'The change ID' },
+            content: { type: 'string', description: 'Followup content' },
+            is_private: { type: 'boolean', description: 'Whether the followup is private (default: false)' },
+          },
+          required: ['change_id', 'content'],
+        },
+      },
+      {
+        name: 'glpi_get_change_followups',
+        description: 'Get all followups/comments for a change',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            change_id: { type: 'number', description: 'The change ID' },
+            limit: { type: 'number', description: 'Maximum number of followups to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+          required: ['change_id'],
+        },
+      },
+      {
+        name: 'glpi_add_change_task',
+        description: 'Add a task to a change',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            change_id: { type: 'number', description: 'The change ID' },
+            content: { type: 'string', description: 'Task description' },
+            actiontime: { type: 'number', description: 'Time spent in seconds' },
+            is_private: { type: 'boolean', description: 'Whether the task is private' },
+            state: { type: 'number', description: 'Task state (0=Information, 1=To do, 2=Done)' },
+            users_id_tech: { type: 'number', description: 'Technician user ID' },
+            groups_id_tech: { type: 'number', description: 'Technician group ID' },
+            begin: { type: 'string', description: 'Task begin datetime' },
+            end: { type: 'string', description: 'Task end datetime' },
+          },
+          required: ['change_id', 'content'],
+        },
+      },
+      {
+        name: 'glpi_get_change_tasks',
+        description: 'Get all tasks for a change',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            change_id: { type: 'number', description: 'The change ID' },
+            limit: { type: 'number', description: 'Maximum number of tasks to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+          required: ['change_id'],
+        },
+      },
+      {
+        name: 'glpi_get_change_interactions',
+        description: 'Get all change interactions (followups, tasks, solutions, approvals) for one or multiple changes',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'number', description: 'Single change ID' },
+            ids: {
+              type: 'array',
+              items: { type: 'number' },
+              description: 'List of change IDs (max: 100)',
+            },
+            limit: { type: 'number', description: 'Maximum number of interactions per category (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
         },
       },
 
@@ -967,6 +1204,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
 
+      // ==================== PLUGIN TAGS TOOLS ====================
+      {
+        name: 'glpi_list_plugin_tags',
+        description: 'List registered tags from plugin Tags',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            plugin_name: { type: 'string', description: "Plugin name (use 'tags')" },
+            limit: { type: 'number', description: 'Maximum number of tags to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+          required: ['plugin_name'],
+        },
+      },
+      {
+        name: 'glpi_search_plugin_tag_items',
+        description: 'Search items linked to a specific tag in plugin Tags',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            plugin_name: { type: 'string', description: "Plugin name (use 'tags')" },
+            tag_id: { type: 'number', description: 'Tag ID' },
+            tag_name: { type: 'string', description: 'Tag name (used when tag_id is not provided)' },
+            itemtype: { type: 'string', description: 'Optional filter by linked item type (e.g., Ticket, Computer)' },
+            limit: { type: 'number', description: 'Maximum number of linked items to return (1-100, default: 50)' },
+            offset: { type: 'number', description: 'Pagination offset (default: 0)' },
+          },
+          required: ['plugin_name'],
+        },
+      },
+
       // ==================== SEARCH TOOL ====================
       {
         name: 'glpi_search',
@@ -1019,8 +1287,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!id) throw new McpError(ErrorCode.InvalidParams, 'Ticket ID is required');
 
         const ticket = await glpiClient.getTicket(id);
-        const followups = await glpiClient.getTicketFollowups(id);
-        const tasks = await glpiClient.getTicketTasks(id);
+        const followups = await glpiClient.getTicketFollowups(id, { limit: MAX_PAGE_LIMIT, offset: 0 });
+        const tasks = await glpiClient.getTicketTasks(id, { limit: MAX_PAGE_LIMIT, offset: 0 });
 
         return {
           content: [{
@@ -1156,10 +1424,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const ticketId = args?.ticket_id as number;
         if (!ticketId) throw new McpError(ErrorCode.InvalidParams, 'ticket_id is required');
 
-        const tasks = await glpiClient.getTicketTasks(ticketId);
+        const pagination = getPagination(args);
+        const tasks = await glpiClient.getTicketTasks(ticketId, pagination);
 
         return {
-          content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }],
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              ticket_id: ticketId,
+              ...pagination,
+              returned: tasks.length,
+              has_more: tasks.length === pagination.limit,
+              items: tasks,
+            }, null, 2),
+          }],
         };
       }
 
@@ -1167,10 +1445,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const ticketId = args?.ticket_id as number;
         if (!ticketId) throw new McpError(ErrorCode.InvalidParams, 'ticket_id is required');
 
-        const followups = await glpiClient.getTicketFollowups(ticketId);
+        const pagination = getPagination(args);
+        const followups = await glpiClient.getTicketFollowups(ticketId, pagination);
 
         return {
-          content: [{ type: 'text', text: JSON.stringify(followups, null, 2) }],
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              ticket_id: ticketId,
+              ...pagination,
+              returned: followups.length,
+              has_more: followups.length === pagination.limit,
+              items: followups,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'glpi_get_ticket_interactions': {
+        const ids = getInteractionIds(args, 'ticket');
+        const pagination = getPagination(args);
+
+        const items = await Promise.all(ids.map(async (ticketId) => {
+          const [followups, tasks, solutions, approvals] = await Promise.all([
+            glpiClient.getTicketFollowups(ticketId, pagination),
+            glpiClient.getTicketTasks(ticketId, pagination),
+            glpiClient.getTicketSolutions(ticketId, pagination),
+            glpiClient.getTicketApprovals(ticketId, pagination),
+          ]);
+
+          return {
+            ticket_id: ticketId,
+            counts: {
+              followups: followups.length,
+              tasks: tasks.length,
+              solutions: solutions.length,
+              approvals: approvals.length,
+            },
+            has_more: {
+              followups: followups.length === pagination.limit,
+              tasks: tasks.length === pagination.limit,
+              solutions: solutions.length === pagination.limit,
+              approvals: approvals.length === pagination.limit,
+            },
+            followups,
+            tasks,
+            solutions,
+            approvals,
+          };
+        }));
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              itemtype: 'Ticket',
+              requested_ids: ids,
+              ...pagination,
+              returned: items.length,
+              items,
+            }, null, 2),
+          }],
         };
       }
 
@@ -1251,6 +1586,131 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'glpi_add_problem_followup': {
+        const problemId = args?.problem_id as number;
+        const content = args?.content as string;
+        if (!problemId || !content) {
+          throw new McpError(ErrorCode.InvalidParams, 'problem_id and content are required');
+        }
+
+        const result = await glpiClient.addProblemFollowup(problemId, content, args?.is_private as boolean);
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: true, followup_id: result.id }, null, 2) }],
+        };
+      }
+
+      case 'glpi_get_problem_followups': {
+        const problemId = args?.problem_id as number;
+        if (!problemId) throw new McpError(ErrorCode.InvalidParams, 'problem_id is required');
+
+        const pagination = getPagination(args);
+        const followups = await glpiClient.getProblemFollowups(problemId, pagination);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              problem_id: problemId,
+              ...pagination,
+              returned: followups.length,
+              has_more: followups.length === pagination.limit,
+              items: followups,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'glpi_add_problem_task': {
+        const problemId = args?.problem_id as number;
+        const content = args?.content as string;
+        if (!problemId || !content) {
+          throw new McpError(ErrorCode.InvalidParams, 'problem_id and content are required');
+        }
+
+        const result = await glpiClient.addProblemTask(problemId, content, {
+          is_private: args?.is_private as boolean,
+          actiontime: args?.actiontime as number,
+          state: args?.state as number,
+          users_id_tech: args?.users_id_tech as number,
+          groups_id_tech: args?.groups_id_tech as number,
+          begin: args?.begin as string,
+          end: args?.end as string,
+        });
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: true, task_id: result.id }, null, 2) }],
+        };
+      }
+
+      case 'glpi_get_problem_tasks': {
+        const problemId = args?.problem_id as number;
+        if (!problemId) throw new McpError(ErrorCode.InvalidParams, 'problem_id is required');
+
+        const pagination = getPagination(args);
+        const tasks = await glpiClient.getProblemTasks(problemId, pagination);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              problem_id: problemId,
+              ...pagination,
+              returned: tasks.length,
+              has_more: tasks.length === pagination.limit,
+              items: tasks,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'glpi_get_problem_interactions': {
+        const ids = getInteractionIds(args, 'problem');
+        const pagination = getPagination(args);
+
+        const items = await Promise.all(ids.map(async (problemId) => {
+          const [followups, tasks, solutions, approvals] = await Promise.all([
+            glpiClient.getProblemFollowups(problemId, pagination),
+            glpiClient.getProblemTasks(problemId, pagination),
+            glpiClient.getProblemSolutions(problemId, pagination),
+            glpiClient.getProblemApprovals(problemId, pagination),
+          ]);
+
+          return {
+            problem_id: problemId,
+            counts: {
+              followups: followups.length,
+              tasks: tasks.length,
+              solutions: solutions.length,
+              approvals: approvals.length,
+            },
+            has_more: {
+              followups: followups.length === pagination.limit,
+              tasks: tasks.length === pagination.limit,
+              solutions: solutions.length === pagination.limit,
+              approvals: approvals.length === pagination.limit,
+            },
+            followups,
+            tasks,
+            solutions,
+            approvals,
+          };
+        }));
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              itemtype: 'Problem',
+              requested_ids: ids,
+              ...pagination,
+              returned: items.length,
+              items,
+            }, null, 2),
+          }],
+        };
+      }
+
       // ==================== CHANGE TOOLS ====================
       case 'glpi_list_changes': {
         const limit = (args?.limit as number) || 50;
@@ -1324,6 +1784,131 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         return {
           content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Change ${id} updated` }, null, 2) }],
+        };
+      }
+
+      case 'glpi_add_change_followup': {
+        const changeId = args?.change_id as number;
+        const content = args?.content as string;
+        if (!changeId || !content) {
+          throw new McpError(ErrorCode.InvalidParams, 'change_id and content are required');
+        }
+
+        const result = await glpiClient.addChangeFollowup(changeId, content, args?.is_private as boolean);
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: true, followup_id: result.id }, null, 2) }],
+        };
+      }
+
+      case 'glpi_get_change_followups': {
+        const changeId = args?.change_id as number;
+        if (!changeId) throw new McpError(ErrorCode.InvalidParams, 'change_id is required');
+
+        const pagination = getPagination(args);
+        const followups = await glpiClient.getChangeFollowups(changeId, pagination);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              change_id: changeId,
+              ...pagination,
+              returned: followups.length,
+              has_more: followups.length === pagination.limit,
+              items: followups,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'glpi_add_change_task': {
+        const changeId = args?.change_id as number;
+        const content = args?.content as string;
+        if (!changeId || !content) {
+          throw new McpError(ErrorCode.InvalidParams, 'change_id and content are required');
+        }
+
+        const result = await glpiClient.addChangeTask(changeId, content, {
+          is_private: args?.is_private as boolean,
+          actiontime: args?.actiontime as number,
+          state: args?.state as number,
+          users_id_tech: args?.users_id_tech as number,
+          groups_id_tech: args?.groups_id_tech as number,
+          begin: args?.begin as string,
+          end: args?.end as string,
+        });
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: true, task_id: result.id }, null, 2) }],
+        };
+      }
+
+      case 'glpi_get_change_tasks': {
+        const changeId = args?.change_id as number;
+        if (!changeId) throw new McpError(ErrorCode.InvalidParams, 'change_id is required');
+
+        const pagination = getPagination(args);
+        const tasks = await glpiClient.getChangeTasks(changeId, pagination);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              change_id: changeId,
+              ...pagination,
+              returned: tasks.length,
+              has_more: tasks.length === pagination.limit,
+              items: tasks,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'glpi_get_change_interactions': {
+        const ids = getInteractionIds(args, 'change');
+        const pagination = getPagination(args);
+
+        const items = await Promise.all(ids.map(async (changeId) => {
+          const [followups, tasks, solutions, approvals] = await Promise.all([
+            glpiClient.getChangeFollowups(changeId, pagination),
+            glpiClient.getChangeTasks(changeId, pagination),
+            glpiClient.getChangeSolutions(changeId, pagination),
+            glpiClient.getChangeApprovals(changeId, pagination),
+          ]);
+
+          return {
+            change_id: changeId,
+            counts: {
+              followups: followups.length,
+              tasks: tasks.length,
+              solutions: solutions.length,
+              approvals: approvals.length,
+            },
+            has_more: {
+              followups: followups.length === pagination.limit,
+              tasks: tasks.length === pagination.limit,
+              solutions: solutions.length === pagination.limit,
+              approvals: approvals.length === pagination.limit,
+            },
+            followups,
+            tasks,
+            solutions,
+            approvals,
+          };
+        }));
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              itemtype: 'Change',
+              requested_ids: ids,
+              ...pagination,
+              returned: items.length,
+              items,
+            }, null, 2),
+          }],
         };
       }
 
@@ -1959,6 +2544,96 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               active_profile: profile,
               available_profiles: profiles,
               entities,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // ==================== PLUGIN TAGS TOOLS ====================
+      case 'glpi_list_plugin_tags': {
+        const pluginName = args?.plugin_name as string;
+        if (!pluginName) throw new McpError(ErrorCode.InvalidParams, 'plugin_name is required');
+        validateTagsPluginName(pluginName);
+
+        const pagination = getPagination(args);
+        const tags = await glpiClient.getPluginTags(pluginName, pagination);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              plugin_name: pluginName,
+              ...pagination,
+              returned: tags.length,
+              has_more: tags.length === pagination.limit,
+              items: tags,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'glpi_search_plugin_tag_items': {
+        const pluginName = args?.plugin_name as string;
+        if (!pluginName) throw new McpError(ErrorCode.InvalidParams, 'plugin_name is required');
+        validateTagsPluginName(pluginName);
+
+        const tagIdRaw = args?.tag_id;
+        const tagName = args?.tag_name as string | undefined;
+        const itemtype = args?.itemtype as string | undefined;
+        const pagination = getPagination(args);
+
+        if (tagIdRaw === undefined && !tagName) {
+          throw new McpError(ErrorCode.InvalidParams, 'tag_id or tag_name is required');
+        }
+
+        let tagId: number;
+        let resolvedTagName = tagName;
+
+        if (tagIdRaw !== undefined) {
+          tagId = Number(tagIdRaw);
+          if (!Number.isInteger(tagId) || tagId < 1) {
+            throw new McpError(ErrorCode.InvalidParams, 'tag_id must be a positive integer');
+          }
+        } else {
+          const tag = await glpiClient.findPluginTagByName(pluginName, tagName as string);
+          if (!tag) {
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  plugin_name: pluginName,
+                  tag_name: tagName,
+                  itemtype: itemtype || null,
+                  ...pagination,
+                  returned: 0,
+                  has_more: false,
+                  items: [],
+                }, null, 2),
+              }],
+            };
+          }
+          tagId = Number(tag.id);
+          resolvedTagName = (tag.name as string) || tagName;
+        }
+
+        const items = await glpiClient.getPluginTagItems(pluginName, tagId, {
+          itemtype,
+          limit: pagination.limit,
+          offset: pagination.offset,
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              plugin_name: pluginName,
+              tag_id: tagId,
+              tag_name: resolvedTagName || null,
+              itemtype: itemtype || null,
+              ...pagination,
+              returned: items.length,
+              has_more: items.length === pagination.limit,
+              items,
             }, null, 2),
           }],
         };

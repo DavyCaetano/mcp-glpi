@@ -11,6 +11,20 @@ export interface GlpiConfig {
   password?: string;
 }
 
+export interface PaginationOptions {
+  limit?: number;
+  offset?: number;
+}
+
+interface NormalizedPagination {
+  limit: number;
+  offset: number;
+  range: string;
+}
+
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 100;
+
 // ==================== INTERFACES ====================
 
 export interface GlpiTicket {
@@ -411,6 +425,118 @@ export class GlpiClient {
     }
   }
 
+  private normalizePagination(options: PaginationOptions = {}): NormalizedPagination {
+    const limit = options.limit ?? DEFAULT_PAGE_LIMIT;
+    const offset = options.offset ?? 0;
+
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error('limit must be an integer greater than 0');
+    }
+
+    if (limit > MAX_PAGE_LIMIT) {
+      throw new Error(`limit cannot exceed ${MAX_PAGE_LIMIT}`);
+    }
+
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error('offset must be an integer greater than or equal to 0');
+    }
+
+    return {
+      limit,
+      offset,
+      range: `${offset}-${offset + limit - 1}`,
+    };
+  }
+
+  private async getSubItems(parentType: string, parentId: number, subItemType: string, pagination: PaginationOptions = {}): Promise<any[]> {
+    await this.ensureSession();
+
+    const { range } = this.normalizePagination(pagination);
+    const params = new URLSearchParams();
+    params.append('range', range);
+
+    const response = await fetch(`${this.config.url}/apirest.php/${parentType}/${parentId}/${subItemType}?${params.toString()}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get ${subItemType} for ${parentType} ${parentId}: ${response.status}`);
+    }
+
+    return response.json() as Promise<any[]>;
+  }
+
+  private async addItilFollowup(itemtype: 'Ticket' | 'Problem' | 'Change', itemId: number, content: string, isPrivate: boolean = false): Promise<{ id: number }> {
+    await this.ensureSession();
+
+    const response = await fetch(`${this.config.url}/apirest.php/ITILFollowup`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        input: {
+          itemtype,
+          items_id: itemId,
+          content,
+          is_private: isPrivate ? 1 : 0,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to add followup: ${response.status} - ${error}`);
+    }
+
+    return response.json() as Promise<{ id: number }>;
+  }
+
+  private async addItilTask(taskType: 'TicketTask' | 'ProblemTask' | 'ChangeTask', itemIdField: 'tickets_id' | 'problems_id' | 'changes_id', itemId: number, content: string, options: {
+    is_private?: boolean;
+    actiontime?: number;
+    state?: number;
+    users_id_tech?: number;
+    groups_id_tech?: number;
+    begin?: string;
+    end?: string;
+  } = {}): Promise<{ id: number }> {
+    await this.ensureSession();
+
+    const response = await fetch(`${this.config.url}/apirest.php/${taskType}`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        input: {
+          [itemIdField]: itemId,
+          content,
+          is_private: options.is_private ? 1 : 0,
+          actiontime: options.actiontime || 0,
+          state: options.state || 1,
+          users_id_tech: options.users_id_tech,
+          groups_id_tech: options.groups_id_tech,
+          begin: options.begin,
+          end: options.end,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to add task: ${response.status} - ${error}`);
+    }
+
+    return response.json() as Promise<{ id: number }>;
+  }
+
+  private ensureSupportedPlugin(pluginName: string): void {
+    const normalized = pluginName.trim().toLowerCase();
+    const supportedNames = ['tag', 'tags', 'plugin_tag', 'plugintag'];
+
+    if (!supportedNames.includes(normalized)) {
+      throw new Error(`Unsupported plugin_name '${pluginName}'. Currently only 'tags' is supported.`);
+    }
+  }
+
   // ==================== GENERIC METHODS ====================
 
   private async getItems<T>(itemtype: string, options: {
@@ -595,27 +721,7 @@ export class GlpiClient {
   }
 
   async addTicketFollowup(ticketId: number, content: string, isPrivate: boolean = false): Promise<{ id: number }> {
-    await this.ensureSession();
-
-    const response = await fetch(`${this.config.url}/apirest.php/ITILFollowup`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        input: {
-          itemtype: 'Ticket',
-          items_id: ticketId,
-          content: content,
-          is_private: isPrivate ? 1 : 0,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to add followup: ${response.status} - ${error}`);
-    }
-
-    return response.json() as Promise<{ id: number }>;
+    return this.addItilFollowup('Ticket', ticketId, content, isPrivate);
   }
 
   async addTicketTask(ticketId: number, content: string, options: {
@@ -627,32 +733,7 @@ export class GlpiClient {
     begin?: string;
     end?: string;
   } = {}): Promise<{ id: number }> {
-    await this.ensureSession();
-
-    const response = await fetch(`${this.config.url}/apirest.php/TicketTask`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        input: {
-          tickets_id: ticketId,
-          content: content,
-          is_private: options.is_private ? 1 : 0,
-          actiontime: options.actiontime || 0,
-          state: options.state || 1,
-          users_id_tech: options.users_id_tech,
-          groups_id_tech: options.groups_id_tech,
-          begin: options.begin,
-          end: options.end,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to add task: ${response.status} - ${error}`);
-    }
-
-    return response.json() as Promise<{ id: number }>;
+    return this.addItilTask('TicketTask', 'tickets_id', ticketId, content, options);
   }
 
   async addTicketSolution(ticketId: number, content: string, solutiontypes_id?: number): Promise<{ id: number }> {
@@ -679,34 +760,20 @@ export class GlpiClient {
     return response.json() as Promise<{ id: number }>;
   }
 
-  async getTicketFollowups(ticketId: number): Promise<any[]> {
-    await this.ensureSession();
-
-    const response = await fetch(`${this.config.url}/apirest.php/Ticket/${ticketId}/ITILFollowup`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get followups: ${response.status}`);
-    }
-
-    return response.json() as Promise<any[]>;
+  async getTicketFollowups(ticketId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Ticket', ticketId, 'ITILFollowup', pagination);
   }
 
-  async getTicketTasks(ticketId: number): Promise<any[]> {
-    await this.ensureSession();
+  async getTicketTasks(ticketId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Ticket', ticketId, 'TicketTask', pagination);
+  }
 
-    const response = await fetch(`${this.config.url}/apirest.php/Ticket/${ticketId}/TicketTask`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
+  async getTicketSolutions(ticketId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Ticket', ticketId, 'ITILSolution', pagination);
+  }
 
-    if (!response.ok) {
-      throw new Error(`Failed to get tasks: ${response.status}`);
-    }
-
-    return response.json() as Promise<any[]>;
+  async getTicketApprovals(ticketId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Ticket', ticketId, 'ITILValidation', pagination);
   }
 
   async assignTicket(ticketId: number, options: {
@@ -762,6 +829,38 @@ export class GlpiClient {
     return this.updateItem('Problem', id, updates);
   }
 
+  async addProblemFollowup(problemId: number, content: string, isPrivate: boolean = false): Promise<{ id: number }> {
+    return this.addItilFollowup('Problem', problemId, content, isPrivate);
+  }
+
+  async getProblemFollowups(problemId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Problem', problemId, 'ITILFollowup', pagination);
+  }
+
+  async addProblemTask(problemId: number, content: string, options: {
+    is_private?: boolean;
+    actiontime?: number;
+    state?: number;
+    users_id_tech?: number;
+    groups_id_tech?: number;
+    begin?: string;
+    end?: string;
+  } = {}): Promise<{ id: number }> {
+    return this.addItilTask('ProblemTask', 'problems_id', problemId, content, options);
+  }
+
+  async getProblemTasks(problemId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Problem', problemId, 'ProblemTask', pagination);
+  }
+
+  async getProblemSolutions(problemId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Problem', problemId, 'ITILSolution', pagination);
+  }
+
+  async getProblemApprovals(problemId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Problem', problemId, 'ITILValidation', pagination);
+  }
+
   // ==================== CHANGES ====================
 
   async getChanges(options: { range?: string; order?: 'ASC' | 'DESC' } = {}) {
@@ -786,6 +885,38 @@ export class GlpiClient {
 
   async updateChange(id: number, updates: Partial<GlpiChange>) {
     return this.updateItem('Change', id, updates);
+  }
+
+  async addChangeFollowup(changeId: number, content: string, isPrivate: boolean = false): Promise<{ id: number }> {
+    return this.addItilFollowup('Change', changeId, content, isPrivate);
+  }
+
+  async getChangeFollowups(changeId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Change', changeId, 'ITILFollowup', pagination);
+  }
+
+  async addChangeTask(changeId: number, content: string, options: {
+    is_private?: boolean;
+    actiontime?: number;
+    state?: number;
+    users_id_tech?: number;
+    groups_id_tech?: number;
+    begin?: string;
+    end?: string;
+  } = {}): Promise<{ id: number }> {
+    return this.addItilTask('ChangeTask', 'changes_id', changeId, content, options);
+  }
+
+  async getChangeTasks(changeId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Change', changeId, 'ChangeTask', pagination);
+  }
+
+  async getChangeSolutions(changeId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Change', changeId, 'ITILSolution', pagination);
+  }
+
+  async getChangeApprovals(changeId: number, pagination: PaginationOptions = {}): Promise<any[]> {
+    return this.getSubItems('Change', changeId, 'ITILValidation', pagination);
   }
 
   // ==================== USERS ====================
@@ -1192,6 +1323,50 @@ export class GlpiClient {
     }
 
     return response.json();
+  }
+
+  // ==================== PLUGIN TAGS ====================
+
+  async getPluginTags(pluginName: string, pagination: PaginationOptions = {}): Promise<any[]> {
+    this.ensureSupportedPlugin(pluginName);
+    const { range } = this.normalizePagination(pagination);
+    return this.getItems<any>('PluginTagTag', { range });
+  }
+
+  async findPluginTagByName(pluginName: string, tagName: string): Promise<any | null> {
+    this.ensureSupportedPlugin(pluginName);
+    const tags = await this.getItems<any>('PluginTagTag', {
+      range: '0-99',
+      searchText: { name: tagName },
+    });
+
+    if (tags.length === 0) return null;
+
+    const normalizedTagName = tagName.trim().toLowerCase();
+    return tags.find((tag: any) => String(tag.name || '').trim().toLowerCase() === normalizedTagName) || tags[0];
+  }
+
+  async getPluginTagItems(pluginName: string, tagId: number, options: {
+    itemtype?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<any[]> {
+    this.ensureSupportedPlugin(pluginName);
+
+    const tagItems = await this.getSubItems('PluginTagTag', tagId, 'PluginTagTagItem', {
+      limit: options.limit,
+      offset: options.offset,
+    });
+
+    if (!options.itemtype) {
+      return tagItems;
+    }
+
+    const expectedItemtype = options.itemtype.toLowerCase();
+    return tagItems.filter((item: any) => {
+      const currentItemtype = String(item.itemtype || item.items_itemtype || item.type || '').toLowerCase();
+      return currentItemtype === expectedItemtype;
+    });
   }
 
   // ==================== STATISTICS ====================
