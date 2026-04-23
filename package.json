@@ -1,6 +1,6 @@
 {
   "name": "@davycaetano/mcp-glpi",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Full-featured MCP Server for GLPI - Complete IT Service Management integration with Claude (Tickets, Problems, Changes, Assets, Knowledge Base, Contracts, Projects)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
